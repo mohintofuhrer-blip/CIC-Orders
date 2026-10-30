@@ -1,0 +1,39 @@
+name: Collect CIC orders
+
+on:
+  schedule:
+    - cron: "0 * * * *"      # every hour (UTC)
+  workflow_dispatch:          # lets you start it by hand from your iPad
+    inputs:
+      mode:
+        description: "run or discover"
+        default: "run"
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Collect orders
+        run: python cic_orders.py ${{ inputs.mode || 'run' }}
+
+      - name: Save results to the repository
+        run: |
+          git config user.name "cic-bot"
+          git config user.email "cic-bot@users.noreply.github.com"
+          git add cic_output
+          git commit -m "Update CIC orders" || exit 0
+          git push
