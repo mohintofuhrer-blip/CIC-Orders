@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CIC Orders Tracker</title>
+<style>
+  :root { --bg:#ffffff; --fg:#1a1a1a; --muted:#666; --line:#ddd; --accent:#0b57d0; --new:#e8f0fe; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#121212; --fg:#eee; --muted:#aaa; --line:#333; --accent:#8ab4f8; --new:#1c2a44; }
+  }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg);
+         font:16px/1.4 -apple-system, system-ui, sans-serif; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin-bottom:12px; }
+  input { width:100%; box-sizing:border-box; padding:10px; font-size:16px;
+          border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); }
+  .wrap { overflow-x:auto; margin-top:12px; }
+  table { border-collapse:collapse; width:100%; min-width:600px; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr.new { background:var(--new); }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<h1>CIC Orders Tracker</h1>
+<div class="sub" id="status">Loading…</div>
+<input id="q" type="search" placeholder="Search orders…">
+<div class="wrap">
+  <table>
+    <thead><tr><th>Found (IST)</th><th>Order details</th><th>PDF</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+
+<script>
+function parseCSV(text) {
+  const rows = []; let row = [], cur = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i+1] === '"') { cur += '"'; i++; }
+      else if (c === '"') q = false;
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+    else if (c !== "\r") cur += c;
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+
+let data = [], newKeys = new Set();
+
+function fmt(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: true });
+}
+
+function render() {
+  const term = document.getElementById("q").value.toLowerCase();
+  const body = document.getElementById("rows");
+  body.textContent = "";
+  data.filter(r => (r.case_info + r.row_text).toLowerCase().includes(term)).forEach(r => {
+    const tr = document.createElement("tr");
+    if (newKeys.has(r.key)) tr.className = "new";
+    const t1 = document.createElement("td"); t1.textContent = fmt(r.found_at);
+    const t2 = document.createElement("td"); t2.textContent = r.case_info;
+    const t3 = document.createElement("td");
+    const href = r.pdf_file ? "cic_output/pdfs/" + r.pdf_file : r.link;
+    if (href) { const a = document.createElement("a"); a.href = href; a.target = "_blank"; a.textContent = "Open"; t3.appendChild(a); }
+    tr.append(t1, t2, t3); body.appendChild(tr);
+  });
+}
+
+async function load() {
+  const st = document.getElementById("status");
+  try {
+    const [all, fresh] = await Promise.all([
+      fetch("cic_output/orders.csv", {cache:"no-store"}).then(r => r.text()),
+      fetch("cic_output/new_orders.csv", {cache:"no-store"}).then(r => r.ok ? r.text() : "")
+    ]);
+    const toObjs = t => { const rows = parseCSV(t.replace(/^\uFEFF/, "")); const h = rows.shift() || [];
+      return rows.filter(r => r.length === h.length).map(r => Object.fromEntries(h.map((k,i) => [k, r[i]]))); };
+    data = toObjs(all).sort((a,b) => b.found_at.localeCompare(a.found_at));
+    newKeys = new Set(toObjs(fresh).map(r => r.key));
+    st.textContent = data.length + " orders tracked · " + newKeys.size + " new in the latest run (highlighted)";
+    render();
+  } catch (e) {
+    st.textContent = "No data yet. Run the workflow once, then reload.";
+  }
+}
+document.getElementById("q").addEventListener("input", render);
+load();
+</script>
+</body>
+</html>
